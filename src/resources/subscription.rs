@@ -3,6 +3,7 @@ use client::Client;
 use resources::{Discount, Plan};
 use params::{List, Metadata, Timestamp};
 use serde_qs as qs;
+use chrono::Utc;
 
 #[derive(Default, Serialize)]
 pub struct CancelParams {
@@ -66,7 +67,7 @@ pub struct SubscriptionItem {
     pub id: String,
     pub created: Timestamp,
     pub plan: Plan,
-    pub quantity: u64,
+    pub quantity: Option<u64>,
 }
 
 /// The resource representing a Stripe subscription.
@@ -88,7 +89,7 @@ pub struct Subscription {
     pub livemode: bool,
     pub metadata: Metadata,
     pub plan: Plan,
-    pub quantity: u64,
+    pub quantity: Option<u64>,
     pub start: Timestamp,
     pub status: String, // (trialing, active, past_due, canceled, unpaid)
     pub tax_percent: Option<f64>,
@@ -122,5 +123,64 @@ impl Subscription {
     /// For more details see https://stripe.com/docs/api#cancel_subscription.
     pub fn cancel(client: &Client, subscription_id: &str, params: CancelParams) -> Result<Subscription, Error> {
         client.delete(&format!("/subscriptions/{}?{}", subscription_id, qs::to_string(&params)?))
+    }
+}
+
+
+/// The parameters to create a Stripe usage record.
+///
+/// For more details see https://stripe.com/docs/api#usage_records.
+#[derive(Debug, Serialize)]
+pub struct UsageRecordParams {
+    pub timestamp: Timestamp,
+    pub quantity: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+}
+
+/// The type of action to apply to the usage record quantity
+pub enum UsageRecordAction {
+    Increment,
+    Set,
+}
+
+impl UsageRecordAction {
+    fn name(&self) -> String {
+        match self {
+            &UsageRecordAction::Increment => "increment".into(),
+            &UsageRecordAction::Set => "set".into(),
+        }
+    }
+}
+
+impl UsageRecordParams {
+    /// Create a usage record, the default action is Increment
+    pub fn create(quantity: u64, action: Option<UsageRecordAction>) -> UsageRecordParams {
+        let timestamp = Utc::now().timestamp();
+        let action = action.map(|a| a.name());
+        UsageRecordParams{ timestamp, quantity, action }
+    }
+}
+
+/// The resource representing a Stripe UsageRecord.
+///
+/// For more details see https://stripe.com/docs/api#subscriptions.
+#[derive(Debug, Deserialize)]
+pub struct UsageRecord {
+    pub id: String,
+    pub object: String,
+    pub livemode: bool,
+    pub quantity: u64,
+    pub subscription_item: String,
+    pub timestamp: Timestamp,
+}
+
+//subscription_items/{SUBSCRIPTION_ITEM_ID}/usage_records
+impl UsageRecord {
+    /// Creates a new subscription for a customer.
+    ///
+    /// For more details see https://stripe.com/docs/api#create_subscription.
+    pub fn create(client: &Client, subscription_item_id: &str, params: UsageRecordParams) -> Result<UsageRecord, Error> {
+        client.post(&format!("/subscription_items/{}/usage_records", subscription_item_id), params)
     }
 }
